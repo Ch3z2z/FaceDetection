@@ -1,4 +1,4 @@
-# Denis Face Detection
+# Face Detection
 
 Приложение для обнаружения ключевых точек лица на Android с использованием обученной TensorFlow Lite модели.
 
