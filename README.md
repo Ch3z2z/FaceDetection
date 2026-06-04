@@ -1,6 +1,9 @@
 # Facial Keypoints Detection Model
 
 Собственная обученная модель для обнаружения ключевых точек лица с поддержкой конвертации под Android и инструментами для оценки качества.
+<div align="center"><img width="806" height="643" alt="image" src="https://github.com/user-attachments/assets/ed52203f-b166-4c79-8150-b9d7dcdc68cd" /></div>
+
+
 
 ## 📋 Описание проекта
 
