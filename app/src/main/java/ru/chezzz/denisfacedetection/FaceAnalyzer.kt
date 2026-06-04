@@ -5,101 +5,213 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.PointF
 import android.graphics.RectF
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetectorOptions
+import org.opencv.android.Utils
+import org.opencv.core.Mat
+import org.opencv.core.MatOfRect
+import org.opencv.core.Rect
+import org.opencv.core.Size
+import org.opencv.imgproc.Imgproc
+import org.opencv.objdetect.CascadeClassifier
+import java.io.File
 
 class FaceAnalyzer(
     context: Context,
     private val overlay: FaceOverlayView
 ) : ImageAnalysis.Analyzer {
 
-    private val detector =
-        FaceDetection.getClient(
-            FaceDetectorOptions.Builder()
-                .setPerformanceMode(
-                    FaceDetectorOptions.PERFORMANCE_MODE_FAST
-                )
-                .build()
-        )
+    private val model = KeypointModel(context)
 
-    private val model =
-        KeypointModel(context)
+    private lateinit var faceCascade: CascadeClassifier
+
+    init {
+        loadCascade(context)
+    }
+
+    private fun loadCascade(context: Context) {
+
+        val input =
+            context.assets.open(
+                "haarcascade_frontalface_default.xml"
+            )
+
+        val cascadeDir =
+            context.getDir(
+                "cascade",
+                Context.MODE_PRIVATE
+            )
+
+        val cascadeFile =
+            File(
+                cascadeDir,
+                "haarcascade_frontalface_default.xml"
+            )
+
+        cascadeFile.outputStream().use {
+            input.copyTo(it)
+        }
+
+        faceCascade =
+            CascadeClassifier(
+                cascadeFile.absolutePath
+            )
+    }
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(
         imageProxy: ImageProxy
     ) {
-        val mediaImage =
-            imageProxy.image ?: run {
-                imageProxy.close()
-                return
+
+        try {
+
+            val rotationDegrees =
+                imageProxy.imageInfo.rotationDegrees
+
+            var bitmap =
+                imageProxy.toBitmap()
+
+            if (rotationDegrees != 0) {
+
+                val matrix = Matrix().apply {
+                    postRotate(
+                        rotationDegrees.toFloat()
+                    )
+                }
+
+                bitmap =
+                    Bitmap.createBitmap(
+                        bitmap,
+                        0,
+                        0,
+                        bitmap.width,
+                        bitmap.height,
+                        matrix,
+                        true
+                    )
             }
 
-        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-        
-        // 1. Convert ImageProxy to Bitmap
-        var bitmap = imageProxy.toBitmap()
+            val allPoints =
+                mutableListOf<PointF>()
 
-        // 2. Rotate Bitmap to be upright (match what the user sees in the preview)
-        if (rotationDegrees != 0) {
-            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            val allBounds =
+                mutableListOf<RectF>()
+
+            val rgba = Mat()
+            Utils.bitmapToMat(
+                bitmap,
+                rgba
+            )
+
+            val gray = Mat()
+
+            Imgproc.cvtColor(
+                rgba,
+                gray,
+                Imgproc.COLOR_RGBA2GRAY
+            )
+
+            val faces = MatOfRect()
+
+            faceCascade.detectMultiScale(
+                gray,
+                faces,
+                1.2,
+                5,
+                0,
+                Size(80.0, 80.0),
+                Size()
+            )
+
+            for (face: Rect in faces.toArray()) {
+
+                val left =
+                    face.x.coerceAtLeast(0)
+
+                val top =
+                    face.y.coerceAtLeast(0)
+
+                val right =
+                    (face.x + face.width)
+                        .coerceAtMost(bitmap.width)
+
+                val bottom =
+                    (face.y + face.height)
+                        .coerceAtMost(bitmap.height)
+
+                val width =
+                    right - left
+
+                val height =
+                    bottom - top
+
+                if (width <= 0 || height <= 0)
+                    continue
+
+                allBounds.add(
+                    RectF(
+                        left.toFloat(),
+                        top.toFloat(),
+                        right.toFloat(),
+                        bottom.toFloat()
+                    )
+                )
+
+                val crop =
+                    Bitmap.createBitmap(
+                        bitmap,
+                        left,
+                        top,
+                        width,
+                        height
+                    )
+
+                val pred =
+                    model.predict(crop)
+                Log.d(
+                    "KP",
+                    pred.take(10).joinToString()
+                )
+
+                for (i in pred.indices step 2) {
+
+                    val px =
+                        left +
+                                pred[i] *
+                                width /
+                                96f
+
+                    val py =
+                        top +
+                                pred[i + 1] *
+                                height /
+                                96f
+
+                    allPoints.add(
+                        PointF(
+                            px,
+                            py
+                        )
+                    )
+                }
+            }
+
+            overlay.update(
+                allPoints,
+                allBounds,
+                bitmap.width,
+                bitmap.height
+            )
+
+            rgba.release()
+            gray.release()
+            faces.release()
+
+        } finally {
+            imageProxy.close()
         }
-
-        // 3. Process the upright bitmap with ML Kit
-        // Since we manually rotated the bitmap, we pass 0 as the rotation degree
-        val image = InputImage.fromBitmap(bitmap, 0)
-
-        detector.process(image)
-            .addOnSuccessListener { faces ->
-                val allPoints = mutableListOf<PointF>()
-                val allBounds = mutableListOf<RectF>()
-
-                if (faces.isEmpty()) {
-                    overlay.update(emptyList(), emptyList(), bitmap.width, bitmap.height)
-                    return@addOnSuccessListener
-                }
-
-                faces.forEach { face ->
-                    val box = face.boundingBox
-                    val rectF = RectF(box)
-                    allBounds.add(rectF)
-
-                    // Ensure the crop area is within the bitmap bounds
-                    val left = box.left.coerceAtLeast(0)
-                    val top = box.top.coerceAtLeast(0)
-                    val right = box.right.coerceAtMost(bitmap.width)
-                    val bottom = box.bottom.coerceAtMost(bitmap.height)
-                    
-                    val width = right - left
-                    val height = bottom - top
-
-                    if (width > 0 && height > 0) {
-                        // 4. Crop the face for the TFLite keypoint model
-                        val crop = Bitmap.createBitmap(bitmap, left, top, width, height)
-                        val pred = model.predict(crop)
-
-                        // 5. Scale the 96x96 keypoints to the actual face bounding box coordinates
-                        // The model returns 30 values (15 points x,y) or 136 values (68 points x,y) etc.
-                        // Assuming the model outputs coordinates in the 0..96 range for a 96x96 input.
-                        for (i in pred.indices step 2) {
-                            val px = left + (pred[i] * width / 96f)
-                            val py = top + (pred[i + 1] * height / 96f)
-                            allPoints.add(PointF(px, py))
-                        }
-                    }
-                }
-
-                // 6. Update the overlay with points, boxes, and the upright image dimensions
-                overlay.update(allPoints, allBounds, bitmap.width, bitmap.height)
-            }
-            .addOnCompleteListener {
-                imageProxy.close()
-            }
     }
 }

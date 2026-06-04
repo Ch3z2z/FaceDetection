@@ -7,7 +7,9 @@ import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
+import kotlin.math.max
 
 class FaceOverlayView(
     context: Context,
@@ -45,24 +47,30 @@ class FaceOverlayView(
         super.onDraw(canvas)
 
         if (imageWidth == 0f || imageHeight == 0f) return
+        val scale = max(
+            width.toFloat() / imageWidth,
+            height.toFloat() / imageHeight
+        )
 
-        val scaleX = width.toFloat() / imageWidth
-        val scaleY = height.toFloat() / imageHeight
+        val offsetX =
+            (width - imageWidth * scale) / 2f
+
+        val offsetY =
+            (height - imageHeight * scale) / 2f
+//        val scaleX = width.toFloat() / imageWidth
+//        val scaleY = height.toFloat() / imageHeight
 
         // Draw bounding boxes
-        faceBounds.forEach { rect ->
-            val mappedRect = RectF(
-                (imageWidth - rect.right) * scaleX,
-                rect.top * scaleY,
-                (imageWidth - rect.left) * scaleX,
-                rect.bottom * scaleY
-            )
-            canvas.drawRect(mappedRect, boxPaint)
-        }
+
 
         // Draw keypoints
         points.forEach { point ->
-            canvas.drawCircle((imageWidth - point.x) * scaleX, point.y * scaleY, 8f, pointPaint)
+            canvas.drawCircle((imageWidth - point.x) * scale + offsetX, point.y * scale + offsetY, 8f, pointPaint)
         }
+
+        Log.d(
+            "SIZE",
+            "img=$imageWidth x $imageHeight view=$width x $height"
+        )
     }
 }

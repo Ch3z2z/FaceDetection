@@ -1,8 +1,11 @@
 package ru.chezzz.denisfacedetection
 
+
+import org.opencv.android.OpenCVLoader
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -36,6 +39,10 @@ class MainActivity : AppCompatActivity() {
             startCamera()
         } else {
             requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+
+        if (!OpenCVLoader.initLocal()) {
+            Log.e("OpenCV", "Init failed")
         }
     }
 

@@ -60,4 +60,5 @@ dependencies {
     implementation("com.google.mlkit:face-detection:16.1.7")
 
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.opencv:opencv:4.10.0")
 }
